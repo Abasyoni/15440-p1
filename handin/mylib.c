@@ -16,8 +16,7 @@
 #include <string.h>
 #include <err.h>
 
-
-
+#include "dirtree.h"
 
 #define MAXMSGLEN 100
 
@@ -30,6 +29,9 @@ off_t (*orig_lseek)(int fd, off_t offset, int whence);
 int (*orig_stat)(int ver, const char * path, struct stat * stat_buf);
 int (*orig_unlink)(const char *path);
 ssize_t (*orig_getdirentries)(int fd, char *buf, size_t nbytes , off_t *basep);
+
+struct dirtreenode* (*orig_getdirtree)( const char *path );
+void (*orig_freedirtree)( struct dirtreenode* dt );
 
 
 int sendToServer (char* msg) {
@@ -145,6 +147,18 @@ ssize_t getdirentries(int fd, char *buf, size_t nbytes , off_t *basep) {
     return orig_getdirentries(fd, buf, nbytes, basep);
 }
 
+struct dirtreenode* getdirtree( const char *path ) {
+	fprintf(stderr, "mylib: getdirtree called\n");
+    sendToServer("getdirtree");
+    return orig_getdirtree(path);
+}
+
+void freedirtree( struct dirtreenode* dt ) {
+	fprintf(stderr, "mylib: freedirtree called\n");
+    sendToServer("freedirtree");
+    return orig_freedirtree(dt);
+}
+
 // This function is automatically called when program is started
 void _init(void) {
 	// set function pointer orig_open to point to the original open function
@@ -156,6 +170,9 @@ void _init(void) {
     orig_stat  = dlsym(RTLD_NEXT, "__xstat");
     orig_unlink = dlsym(RTLD_NEXT, "unlink");
     orig_getdirentries = dlsym(RTLD_NEXT, "getdirentries");
+    orig_getdirtree = dlsym(RTLD_NEXT, "getdirtree");
+    orig_freedirtree = dlsym(RTLD_NEXT, "freedirtree");
+    
 	fprintf(stderr, "Init mylib\n");
 }
 
