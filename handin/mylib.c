@@ -17,11 +17,19 @@
 #include <err.h>
 
 
+
+
 #define MAXMSGLEN 100
 
 // The following line declares a function pointer with the same prototype as the open function.
 int (*orig_open)(const char *pathname, int flags, ...);  // mode_t mode is needed when flags includes O_CREAT
-ssize_t (*orig_read)(int fildes, void *buf, size_t nbyte);  // mode_t mode is needed when flags includes O_CREAT
+int (*orig_close)(int fildes);
+ssize_t (*orig_read)(int fildes, void *buf, size_t nbyte);
+ssize_t (*orig_write)(int fildes, const void *buf, size_t nbyte);
+off_t (*orig_lseek)(int fd, off_t offset, int whence);
+int (*orig_stat)(int ver, const char * path, struct stat * stat_buf);
+int (*orig_unlink)(const char *path);
+ssize_t (*orig_getdirentries)(int fd, char *buf, size_t nbytes , off_t *basep);
 
 
 int sendToServer (char* msg) {
@@ -74,7 +82,7 @@ int sendToServer (char* msg) {
 	printf("client got messge: %s\n", buf);
 
 	// close socket
-	close(sockfd);
+	orig_close(sockfd);
 
 	return 0;
 }
@@ -96,24 +104,58 @@ int open(const char *pathname, int flags, ...) {
 
 
 ssize_t read(int fildes, void *buf, size_t nbyte) {
-	/* mode_t m=0; */
-	/* if (flags & O_CREAT) { */
-	/* 	va_list a; */
-	/* 	va_start(a, flags); */
-	/* 	m = va_arg(a, mode_t); */
-	/* 	va_end(a); */
-	/* } */
-	// we just print a message, then call through to the original open function (from libc)
-	fprintf(stderr, "mylib: read called");
+	fprintf(stderr, "mylib: read called\n");
     sendToServer("read");
 	return orig_read(fildes, buf, nbyte);
+}
+
+ssize_t write(int fildes, const void *buf, size_t nbyte) {
+	fprintf(stderr, "mylib: write called\n");
+    sendToServer("write");
+	return orig_write(fildes, buf, nbyte);
+}
+
+int close(int fildes) {
+	fprintf(stderr, "mylib: close called\n");
+    sendToServer("close");
+	return orig_close(fildes);
+}
+
+off_t lseek(int fd, off_t offset, int whence) {
+	fprintf(stderr, "mylib: lseek called\n");
+    sendToServer("lseek");
+    return orig_lseek(fd, offset, whence);
+}
+
+int __xstat(int ver, const char * path, struct stat * stat_buf) {
+	fprintf(stderr, "mylib: stat called\n");
+    sendToServer("stat");
+    return orig_stat(ver, path, stat_buf);
+}
+
+int unlink(const char *path) {
+	fprintf(stderr, "mylib: unlink called\n");
+    sendToServer("unlink");
+    return orig_unlink(path);
+}
+
+ssize_t getdirentries(int fd, char *buf, size_t nbytes , off_t *basep) {
+	fprintf(stderr, "mylib: getdirentries called\n");
+    sendToServer("getdirentries");
+    return orig_getdirentries(fd, buf, nbytes, basep);
 }
 
 // This function is automatically called when program is started
 void _init(void) {
 	// set function pointer orig_open to point to the original open function
-	orig_open = dlsym(RTLD_NEXT, "open");
-	orig_read = dlsym(RTLD_NEXT, "read");
+	orig_open  = dlsym(RTLD_NEXT, "open");
+	orig_close = dlsym(RTLD_NEXT, "close");
+	orig_read  = dlsym(RTLD_NEXT, "read");
+	orig_write = dlsym(RTLD_NEXT, "write");
+    orig_lseek = dlsym(RTLD_NEXT, "lseek");
+    orig_stat  = dlsym(RTLD_NEXT, "__xstat");
+    orig_unlink = dlsym(RTLD_NEXT, "unlink");
+    orig_getdirentries = dlsym(RTLD_NEXT, "getdirentries");
 	fprintf(stderr, "Init mylib\n");
 }
 

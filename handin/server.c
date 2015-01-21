@@ -43,7 +43,7 @@ int main(int argc, char**argv) {
 	if (rv<0) err(1,0);
 
 	// main server loop, handle clients one at a time, quit after 10 clients
-	for( i=0; i<10; i++ ) {
+	while(1) {
 
 		// wait for next client, get session socket
 		sa_size = sizeof(struct sockaddr_in);
