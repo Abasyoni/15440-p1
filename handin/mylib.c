@@ -23,11 +23,10 @@
 int (*orig_open)(const char *pathname, int flags, ...);  // mode_t mode is needed when flags includes O_CREAT
 
 
-int sendToServer () {
+int sendToServer (char* msg) {
 	char *serverip;
 	char *serverport;
 	unsigned short port;
-	char *msg="Hello from client";
 	char buf[MAXMSGLEN+1];
 	int sockfd, rv;
 	struct sockaddr_in srv;
@@ -90,7 +89,7 @@ int open(const char *pathname, int flags, ...) {
 	}
 	// we just print a message, then call through to the original open function (from libc)
 	fprintf(stderr, "mylib: open called for path %s\n", pathname);
-    sendToServer();
+    sendToServer("open");
 	return orig_open(pathname, flags, m);
 }
 
