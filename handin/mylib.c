@@ -6,9 +6,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <stdarg.h>
 
+#include <unistd.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -21,6 +21,7 @@
 
 // The following line declares a function pointer with the same prototype as the open function.
 int (*orig_open)(const char *pathname, int flags, ...);  // mode_t mode is needed when flags includes O_CREAT
+ssize_t (*orig_read)(int fildes, void *buf, size_t nbyte);  // mode_t mode is needed when flags includes O_CREAT
 
 
 int sendToServer (char* msg) {
@@ -93,10 +94,26 @@ int open(const char *pathname, int flags, ...) {
 	return orig_open(pathname, flags, m);
 }
 
+
+ssize_t read(int fildes, void *buf, size_t nbyte) {
+	/* mode_t m=0; */
+	/* if (flags & O_CREAT) { */
+	/* 	va_list a; */
+	/* 	va_start(a, flags); */
+	/* 	m = va_arg(a, mode_t); */
+	/* 	va_end(a); */
+	/* } */
+	// we just print a message, then call through to the original open function (from libc)
+	fprintf(stderr, "mylib: read called");
+    sendToServer("read");
+	return orig_read(fildes, buf, nbyte);
+}
+
 // This function is automatically called when program is started
 void _init(void) {
 	// set function pointer orig_open to point to the original open function
 	orig_open = dlsym(RTLD_NEXT, "open");
+	orig_read = dlsym(RTLD_NEXT, "read");
 	fprintf(stderr, "Init mylib\n");
 }
 
