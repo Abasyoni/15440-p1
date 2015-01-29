@@ -10,6 +10,43 @@
 
 #define MAXMSGLEN 100
 
+typedef struct {
+    size_t size;
+    int type;
+} opHeader;
+
+typedef struct {
+    int a;
+    int b;
+    char s[];
+} para;
+
+
+typedef enum {
+    KOPENOP,
+    KCLOSEOP,
+    KREADOP,
+    KWRITEOP
+} optype;
+
+char* replyToClient(optype op,int returnValue, int errorNumber, int *size) {
+    printf("Generating reply.\n");
+    *size = sizeof(para)+sizeof(opHeader);
+    para *p = malloc(sizeof(para));
+    p->a = returnValue;
+    p->b = errorNumber;
+    opHeader* h = malloc(sizeof(opHeader));
+    h->type = op;
+    h->size= sizeof(para);
+    char* msg = malloc (sizeof(para)+ sizeof(opHeader));
+    memcpy(msg, h, sizeof(opHeader));
+    memcpy(msg+sizeof(opHeader), p, sizeof(para));
+    free(p);
+    free(h);
+    
+    return msg;
+}
+
 int main(int argc, char**argv) {
 	char *msg="Hello from server";
 	char buf[MAXMSGLEN+1];
@@ -51,13 +88,58 @@ int main(int argc, char**argv) {
 		if (sessfd<0) err(1,0);
 
 		// get messages and send replies to this client, until it goes away
-		while ( (rv=recv(sessfd, buf, MAXMSGLEN, 0)) > 0) {
-			buf[rv]=0;		// null terminate string to print
-			printf("%s\n", buf);
+        opHeader* hdr = malloc(sizeof(opHeader));
+        if ( (rv=recv(sessfd, hdr, sizeof(opHeader), 0)) > 0) {
+            printf("Got header: type: %d, size: %zd\n", hdr->type, hdr->size);
+            para* buf1 = malloc(hdr->size);
+            switch (hdr->type) {
+                case KOPENOP:
+                    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+                        para *p = buf1;
+                        printf("Got para: flags: %d, mode: %d, filepath: %s", p->a, p->b, p->s);
+                        printf("\n");
 
-			// send reply
-			send(sessfd, msg, strlen(msg), 0);	// should check return value
-		}
+                        // send reply
+                        printf("Sending reply. \n");
+                        int mSize = 0;
+                        char *msg = replyToClient(KOPENOP,0,1,&mSize);
+                        send(sessfd, msg, mSize, 0);	// should check return value
+                    }
+                    break;
+                    
+                case KWRITEOP:
+                    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+                        para *p = buf1;
+                        printf("Got para: fd: %d, buf: %s, nbyte: %d", p->a, p->s, p->b);
+                        printf("\n");
+
+                        // send reply
+                        printf("Sending reply. \n");
+                        int mSize = 0;
+                        char *msg = replyToClient(KWRITEOP,2,3,&mSize);
+                        send(sessfd, msg, mSize, 0);	// should check return value
+                    }
+                    break;
+                    
+                case KCLOSEOP:
+                    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+                        para *p = buf1;
+                        printf("Got para: fd: %d", p->a);
+                        printf("\n");
+
+                        // send reply
+                        printf("Sending reply. \n");
+                        int mSize = 0;
+                        char *msg = replyToClient(KCLOSEOP,4,5,&mSize);
+                        send(sessfd, msg, mSize, 0);	// should check return value
+                    }
+                    break;
+                    
+                default:
+                    break;
+            }
+        }
+
 
 		// either client closed connection, or error
 		if (rv<0) err(1,0);
