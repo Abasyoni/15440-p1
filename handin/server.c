@@ -48,7 +48,6 @@ char* replyToClient(optype op,int returnValue, int errorNumber, int *size) {
 }
 
 int main(int argc, char**argv) {
-	char *msg="Hello from server";
 	char buf[MAXMSGLEN+1];
 	char *serverport;
 	unsigned short port;
@@ -98,6 +97,10 @@ int main(int argc, char**argv) {
                         para *p = buf1;
                         printf("Got para: flags: %d, mode: %d, filepath: %s", p->a, p->b, p->s);
                         printf("\n");
+                        
+                        const char* filepath = p->a;
+                        open(filepath, p->a, p->b);
+                        
 
                         // send reply
                         printf("Sending reply. \n");

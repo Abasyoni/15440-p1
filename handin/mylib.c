@@ -96,11 +96,8 @@ para* sendToServer (void* msg, size_t size) {
 	rv = recv(sockfd, buf, RETURNSIZE, 0);	// get message
     opHeader* hdr = malloc(sizeof(opHeader));
     memcpy(hdr, buf, sizeof(opHeader));
-    printf("Got back header: type: %d, size: %zd\n", hdr->type, hdr->size);
     para* buf1 = malloc(hdr->size);
     memcpy(buf1, buf+sizeof(opHeader), hdr->size);
-    printf("Got return: %d, error num: %d", buf1->a, buf1->b);
-    printf("\n");
     free(hdr);
     
 	if (rv<0) err(1,0);			// in case something went wrong
