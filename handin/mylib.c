@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <string.h>
 #include <err.h>
+#include <errno.h>
 
 #include "dirtree.h"
 
@@ -99,35 +100,36 @@ para* sendToServer (void* msg, size_t size) {
     para* buf1 = malloc(hdr->size);
     memcpy(buf1, buf+sizeof(opHeader), hdr->size);
     free(hdr);
-    
+
 	if (rv<0) err(1,0);			// in case something went wrong
 	buf[rv]=0;				// null terminate string to print
 
 	// close socket
 	orig_close(sockfd);
-    
+
 
 	return buf1;
 }
 
 para* serialize_open(const char* pathname, int flags, int mode, int* size) {
-    size_t strSize = sizeof(pathname);
+    size_t strSize = strlen(pathname) + 1;
     *size = sizeof(para) + strSize;
     para* p = malloc(sizeof(para) + strSize);
     p->a = flags;
-    p->b = 0;
-    stpcpy(p->s, pathname);
+    p->b = mode;
+    strncpy(p->s, pathname, strSize);
     return p;
 }
 
 
 para* serialize_write(int fd, const void *buf, size_t nbyte, int* size) {
-    size_t strSize = nbyte;
+    size_t strSize = nbyte+1;
     *size = sizeof(para) + strSize;
     para* p = malloc(sizeof(para) + strSize);
     p->a = fd;
     p->b = nbyte;
-    stpcpy(p->s, (char*)buf);
+    memcpy(p->s, buf, nbyte);
+    /* strncpy(p->s, (char*)buf, nbyte); */
     return p;
 }
 
@@ -141,7 +143,7 @@ para* serialize_close(int fd, int *size) {
 
 // This is our replacement for the open function from libc.
 int open(const char *pathname, int flags, ...) {
-    printf("open!\n");
+    /* printf("open pathname: %s, flags: %d\n", pathname, flags); */
 	mode_t m=0;
 	if (flags & O_CREAT) {
 		va_list a;
@@ -152,60 +154,71 @@ int open(const char *pathname, int flags, ...) {
 	// we just print a message, then call through to the original open function (from libc)
     int psize = 0;
     para *p = serialize_open(pathname, flags, m, &psize);
+    /* printf("    in para pathname: %s, flags: %d\n", p->s, p->a); */
     opHeader* h = malloc(sizeof(opHeader));
     h->type = KOPENOP;
     h->size= psize;
-    char* msg = malloc (psize + sizeof(opHeader));
+    char* msg = malloc(psize + sizeof(opHeader));
     memcpy(msg, h, sizeof(opHeader));
     memcpy(msg+sizeof(opHeader), p, psize);
-    sendToServer(msg, (psize+sizeof(opHeader)));
     free(h);
-    free(msg);
     free(p);
-	return orig_open(pathname, flags, m);
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    free(pRet);
+    free(msg);
+	return ret;
 }
 
 
 ssize_t read(int fd, void *buf, size_t nbyte) {
-    printf("read!\n");
+//    printf("read!\n");
 	return orig_read(fd, buf, nbyte);
 }
 
 ssize_t write(int fd, const void *buf, size_t nbyte) {
-    printf("write!\n");
+    /* printf("write fd: %d, nbytes: %zd, buf: %s\n", fd, nbyte, (char*)buf); */
     int psize = 0;
     const void* buf1 = buf;
     para *p = serialize_write(fd, buf1, nbyte, &psize);
+    /* printf("    in para fd: %d, nbytes: %d, buf: %s\n", p->a, p->b, p->s); */
     opHeader* h = malloc(sizeof(opHeader));
     h->type = KWRITEOP;
     h->size= psize;
     char* msg = malloc (psize + sizeof(opHeader));
     memcpy(msg, h, sizeof(opHeader));
     memcpy(msg+sizeof(opHeader), p, psize);
-    sendToServer(msg, (psize+sizeof(opHeader)));
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    free(pRet);
     free(h);
     free(msg);
     free(p);
 //    sendToServer("write", 6);
-	return orig_write(fd, buf, nbyte);
+	return ret;
 }
 
 int close(int fd) {
-    printf("close!\n");
+    /* printf("close fd: %d\n", fd); */
     int psize = 0;
     para *p = serialize_close(fd, &psize);
+    /* printf("    in para fd: %d\n", p->a); */
     opHeader* h = malloc(sizeof(opHeader));
     h->type = KCLOSEOP;
     h->size= psize;
     char* msg = malloc (psize + sizeof(opHeader));
     memcpy(msg, h, sizeof(opHeader));
     memcpy(msg+sizeof(opHeader), p, psize);
-    sendToServer(msg, (psize+sizeof(opHeader)));
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    free(pRet);
     free(h);
     free(msg);
     free(p);
-//    sendToServer("close", 6);
-	return orig_close(fd);
+	return ret;
 }
 
 off_t lseek(int fd, off_t offset, int whence) {

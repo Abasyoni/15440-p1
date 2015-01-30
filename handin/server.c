@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <err.h>
+#include <errno.h>
 
 #define MAXMSGLEN 100
 
@@ -30,7 +31,6 @@ typedef enum {
 } optype;
 
 char* replyToClient(optype op,int returnValue, int errorNumber, int *size) {
-    printf("Generating reply.\n");
     *size = sizeof(para)+sizeof(opHeader);
     para *p = malloc(sizeof(para));
     p->a = returnValue;
@@ -43,7 +43,7 @@ char* replyToClient(optype op,int returnValue, int errorNumber, int *size) {
     memcpy(msg+sizeof(opHeader), p, sizeof(para));
     free(p);
     free(h);
-    
+
     return msg;
 }
 
@@ -89,60 +89,64 @@ int main(int argc, char**argv) {
 		// get messages and send replies to this client, until it goes away
         opHeader* hdr = malloc(sizeof(opHeader));
         if ( (rv=recv(sessfd, hdr, sizeof(opHeader), 0)) > 0) {
-            printf("Got header: type: %d, size: %zd\n", hdr->type, hdr->size);
-            para* buf1 = malloc(hdr->size);
+//            printf("Got header: type: %d, size: %zd\n", hdr->type, hdr->size);
+            char* buf1 = malloc(hdr->size);
             switch (hdr->type) {
                 case KOPENOP:
                     while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
-                        para *p = buf1;
-                        printf("Got para: flags: %d, mode: %d, filepath: %s", p->a, p->b, p->s);
-                        printf("\n");
-                        
-                        const char* filepath = p->a;
-                        open(filepath, p->a, p->b);
-                        
+                        para *p = (para*) buf1;
+
+                        const char* filepath = p->s;
+                        /* printf("OPEN pathname: %s, flags: %d\n", filepath, p->a); */
+                        int ret = open(filepath, p->a, p->b);
+
 
                         // send reply
-                        printf("Sending reply. \n");
+//                        printf("Sending reply. \n");
                         int mSize = 0;
-                        char *msg = replyToClient(KOPENOP,0,1,&mSize);
+                        char *msg = replyToClient(KOPENOP, ret, errno,&mSize);
                         send(sessfd, msg, mSize, 0);	// should check return value
+                        free(msg);
                     }
                     break;
-                    
+
                 case KWRITEOP:
                     while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
-                        para *p = buf1;
-                        printf("Got para: fd: %d, buf: %s, nbyte: %d", p->a, p->s, p->b);
-                        printf("\n");
+                        para *p = (para*) buf1;
+
+                        const void* writeBuf = p->s;
+                        /* printf("WRITE fd: %d, nbytes: %d, buf: %s\n", p->a, p->b, p->s); */
+                        int ret = write(p->a, writeBuf, p->b);
 
                         // send reply
-                        printf("Sending reply. \n");
+//                        printf("Sending reply. \n");
                         int mSize = 0;
-                        char *msg = replyToClient(KWRITEOP,2,3,&mSize);
+                        char *msg = replyToClient(KWRITEOP, ret, errno,&mSize);
                         send(sessfd, msg, mSize, 0);	// should check return value
+                        free(msg);
                     }
                     break;
-                    
+
                 case KCLOSEOP:
                     while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
-                        para *p = buf1;
-                        printf("Got para: fd: %d", p->a);
-                        printf("\n");
+                        para *p = (para*) buf1;
+                        int ret = close(p->a);
 
                         // send reply
-                        printf("Sending reply. \n");
+//                        printf("Sending reply. \n");
                         int mSize = 0;
-                        char *msg = replyToClient(KCLOSEOP,4,5,&mSize);
+                        char *msg = replyToClient(KCLOSEOP, ret, errno,&mSize);
                         send(sessfd, msg, mSize, 0);	// should check return value
+                        free(msg);
                     }
                     break;
-                    
+
                 default:
                     break;
             }
+            free(buf1);
         }
-
+        free(hdr);
 
 		// either client closed connection, or error
 		if (rv<0) err(1,0);
