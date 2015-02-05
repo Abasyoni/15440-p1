@@ -83,6 +83,25 @@ void serverWrite(int rv, int sessfd, char* buf1, opHeader *hdr){
     }
 }
 
+
+void serverRead(int rv, int sessfd, char* buf1, opHeader *hdr){
+    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+        para *p = (para*) buf1;
+
+        char *readBuf = malloc(p->b);
+//         printf("Read fd: %d, nbytes: %d, buf: %s\n", p->a, p->b, p->s); 
+        int ret = read(p->a, readBuf, p->b);
+
+        // send reply
+//                        printf("Sending reply. \n");
+        int mSize = 0;
+        char *msg = replyToClient(KREADOP, ret, errno, readBuf, &mSize);
+        send(sessfd, msg, mSize, 0);	// should check return value
+        free(readBuf);
+        free(msg);
+    }
+}
+
 void serverClose(int rv, int sessfd, char* buf1, opHeader *hdr){
     while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
         para *p = (para*) buf1;
@@ -147,15 +166,15 @@ int main(int argc, char**argv) {
                 case KOPENOP:
                     serverOpen(rv, sessfd, buf1, hdr);
                     break;
-
                 case KWRITEOP:
                     serverWrite(rv, sessfd, buf1, hdr);
                     break;
-
+                case KREADOP:
+                    serverRead(rv, sessfd, buf1, hdr);
+                    break;
                 case KCLOSEOP:
                     serverClose(rv, sessfd, buf1, hdr);
                     break;
-
                 default:
                     break;
             }

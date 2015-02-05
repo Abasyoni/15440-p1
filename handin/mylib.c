@@ -135,6 +135,14 @@ para* serialize_write(int fd, const void *buf, size_t nbyte, int* size) {
     return p;
 }
 
+para* serialize_read(int fd, size_t nbyte, int *size) {
+    *size = sizeof(para);
+    para* p = malloc(sizeof(para));
+    p->a = fd;
+    p->b = nbyte;
+    return p;
+}
+
 para* serialize_close(int fd, int *size) {
     *size = sizeof(para);
     para* p = malloc(sizeof(para));
@@ -176,11 +184,30 @@ int open(const char *pathname, int flags, ...) {
 
 ssize_t read(int fd, void *buf, size_t nbyte) {
 //    printf("read!\n");
-	return orig_read(fd, buf, nbyte);
+    int psize = 0;
+//     printf("    input fd: %d, nbytes: %zd\n", fd, nbyte);
+    para *p = serialize_read(fd, nbyte, &psize);
+    /* printf("    in para fd: %d, nbytes: %d, buf: %s\n", p->a, p->b, p->s); */
+    opHeader* h = malloc(sizeof(opHeader));
+    h->type = KREADOP;
+    h->size= psize;
+    char* msg = malloc (psize + sizeof(opHeader));
+    memcpy(msg, h, sizeof(opHeader));
+    memcpy(msg+sizeof(opHeader), p, psize);
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    memcpy(buf, pRet->s, nbyte);
+    free(pRet);
+    free(h);
+    free(msg);
+    free(p);
+//    sendToServer("write", 6);
+	return ret;
 }
 
 ssize_t write(int fd, const void *buf, size_t nbyte) {
-    printf("Write!");
+//    printf("Write!");
 
     /* printf("write fd: %d, nbytes: %zd, buf: %s\n", fd, nbyte, (char*)buf); */
     int psize = 0;
