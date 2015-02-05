@@ -30,17 +30,19 @@ typedef enum {
     KWRITEOP
 } optype;
 
-char* replyToClient(optype op,int returnValue, int errorNumber, int *size) {
-    *size = sizeof(para)+sizeof(opHeader);
-    para *p = malloc(sizeof(para));
+char* replyToClient(optype op,int returnValue, int errorNumber, char* buf,int *size) {
+    *size = sizeof(para)+sizeof(opHeader)+strlen(buf)+1;
+    int strSize = strlen(buf)+1;
+    para *p = malloc(sizeof(para)+strSize);
     p->a = returnValue;
     p->b = errorNumber;
+    strncpy(p->s, buf, strSize);
     opHeader* h = malloc(sizeof(opHeader));
     h->type = op;
-    h->size= sizeof(para);
-    char* msg = malloc (sizeof(para)+ sizeof(opHeader));
+    h->size= sizeof(para)+strSize;
+    char* msg = malloc (sizeof(para) + strSize + sizeof(opHeader));
     memcpy(msg, h, sizeof(opHeader));
-    memcpy(msg+sizeof(opHeader), p, sizeof(para));
+    memcpy(msg+sizeof(opHeader), p, sizeof(para)+strSize);
     free(p);
     free(h);
 
@@ -104,7 +106,7 @@ int main(int argc, char**argv) {
                         // send reply
 //                        printf("Sending reply. \n");
                         int mSize = 0;
-                        char *msg = replyToClient(KOPENOP, ret, errno,&mSize);
+                        char *msg = replyToClient(KOPENOP, ret, errno, NULL,&mSize);
                         send(sessfd, msg, mSize, 0);	// should check return value
                         free(msg);
                     }
@@ -121,7 +123,7 @@ int main(int argc, char**argv) {
                         // send reply
 //                        printf("Sending reply. \n");
                         int mSize = 0;
-                        char *msg = replyToClient(KWRITEOP, ret, errno,&mSize);
+                        char *msg = replyToClient(KWRITEOP, ret, errno, NULL,&mSize);
                         send(sessfd, msg, mSize, 0);	// should check return value
                         free(msg);
                     }
@@ -135,7 +137,7 @@ int main(int argc, char**argv) {
                         // send reply
 //                        printf("Sending reply. \n");
                         int mSize = 0;
-                        char *msg = replyToClient(KCLOSEOP, ret, errno,&mSize);
+                        char *msg = replyToClient(KCLOSEOP, ret, errno, NULL,&mSize);
                         send(sessfd, msg, mSize, 0);	// should check return value
                         free(msg);
                     }
