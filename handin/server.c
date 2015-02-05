@@ -19,6 +19,7 @@ typedef struct {
 typedef struct {
     int a;
     int b;
+    int c;
     char s[];
 } para;
 
@@ -27,19 +28,28 @@ typedef enum {
     KOPENOP,
     KCLOSEOP,
     KREADOP,
-    KWRITEOP
+    KWRITEOP,
+    KLSEEKOP,
+    KSTATOP,
+    KUNLINKOP,
+    KGETDIRENTRIESOP,
+    KGETDIRTREEOP,
+    KFREEDIRTREE
 } optype;
 
-char* replyToClient(optype op,int returnValue, int errorNumber, char* buf,int *size) {
+char* replyToClient(optype op,int returnValue, int errorNumber, int passBack,
+                    char* buf,int *size) {
     *size = sizeof(para)+sizeof(opHeader)+strlen(buf)+1;
     int strSize = strlen(buf)+1;
     para *p = malloc(sizeof(para)+strSize);
     p->a = returnValue;
     p->b = errorNumber;
+    p->c = passBack;
     strncpy(p->s, buf, strSize);
     opHeader* h = malloc(sizeof(opHeader));
     h->type = op;
     h->size= sizeof(para)+strSize;
+//    printf("In replyToClient: p size: %d\n", h->size);
     char* msg = malloc (sizeof(para) + strSize + sizeof(opHeader));
     memcpy(msg, h, sizeof(opHeader));
     memcpy(msg+sizeof(opHeader), p, sizeof(para)+strSize);
@@ -60,7 +70,7 @@ void serverOpen(int rv, int sessfd, char* buf1, opHeader *hdr){
         // send reply
 //                        printf("Sending reply. \n");
         int mSize = 0;
-        char *msg = replyToClient(KOPENOP, ret, errno, "",&mSize);
+        char *msg = replyToClient(KOPENOP, ret, errno, 0,"",&mSize);
         send(sessfd, msg, mSize, 0);	// should check return value
         free(msg);
     }
@@ -77,7 +87,7 @@ void serverWrite(int rv, int sessfd, char* buf1, opHeader *hdr){
         // send reply
 //                        printf("Sending reply. \n");
         int mSize = 0;
-        char *msg = replyToClient(KWRITEOP, ret, errno, "",&mSize);
+        char *msg = replyToClient(KWRITEOP, ret, errno, 0, "",&mSize);
         send(sessfd, msg, mSize, 0);	// should check return value
         free(msg);
     }
@@ -95,7 +105,7 @@ void serverRead(int rv, int sessfd, char* buf1, opHeader *hdr){
         // send reply
 //                        printf("Sending reply. \n");
         int mSize = 0;
-        char *msg = replyToClient(KREADOP, ret, errno, readBuf, &mSize);
+        char *msg = replyToClient(KREADOP, ret, errno, 0, readBuf, &mSize);
         send(sessfd, msg, mSize, 0);	// should check return value
         free(readBuf);
         free(msg);
@@ -110,11 +120,80 @@ void serverClose(int rv, int sessfd, char* buf1, opHeader *hdr){
         // send reply
 //                        printf("Sending reply. \n");
         int mSize = 0;
-        char *msg = replyToClient(KCLOSEOP, ret, errno, "",&mSize);
+        char *msg = replyToClient(KCLOSEOP, ret, errno, 0, "",&mSize);
         send(sessfd, msg, mSize, 0);	// should check return value
         free(msg);
     }
     
+}
+
+void serverLSeek(int rv, int sessfd, char* buf1, opHeader *hdr){
+    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+        para *p = (para*) buf1;
+        int ret = lseek(p->a, p->b, p->c);
+
+        // send reply
+//                        printf("Sending reply. \n");
+        int mSize = 0;
+        char *msg = replyToClient(KLSEEKOP, ret, errno, 0, "",&mSize);
+        send(sessfd, msg, mSize, 0);	// should check return value
+        free(msg);
+    }
+}
+
+void serverStat(int rv, int sessfd, char* buf1, opHeader *hdr){
+    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+        para *p = (para*) buf1;
+        int pathLen = p->b;
+        char *path = malloc(pathLen);
+        memcpy(path, p->s, pathLen);
+        const char* conPath = path;
+        int ret = __xstat(p->a, conPath, (struct stat *)(p->s+pathLen));
+
+        // send reply
+//                        printf("Sending reply. \n");
+        int mSize = 0;
+        char *msg = replyToClient(KSTATOP, ret, errno, 0, "",&mSize);
+        send(sessfd, msg, mSize, 0);	// should check return value
+        free(path);
+        free(msg);
+    }
+}
+
+void serverUnlink(int rv, int sessfd, char* buf1, opHeader *hdr){
+    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+        para *p = (para*) buf1;
+        const void* path = p->s;
+        int ret = unlink(path);
+
+        // send reply
+//                        printf("Sending reply. \n");
+        int mSize = 0;
+        char *msg = replyToClient(KUNLINKOP, ret, errno, 0, "",&mSize);
+        send(sessfd, msg, mSize, 0);	// should check return value
+        free(msg);
+    }
+}
+
+void serverGetdirentries(int rv, int sessfd, char* buf1, opHeader *hdr){
+    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+        para *p = (para*) buf1;
+
+        char *readBuf = malloc((p->b)+1);
+        readBuf[p->b] = '\0';
+        off_t base = p->c;
+//         printf("    Read fd: %d, nbytes: %d, basep: %d\n", p->a, p->b, p->c);
+        int ret = getdirentries(p->a, readBuf, p->b, &base);
+
+        // send reply
+//                        printf("Sending reply. \n");
+        int mSize = 0;
+        char *msg = replyToClient(KREADOP, ret, errno, base, readBuf, &mSize);
+//        printf("    msize: %d\n", mSize);
+        send(sessfd, msg, mSize, 0);	// should check return value
+        free(readBuf);
+        free(msg);
+    }
 }
 
 int main(int argc, char**argv) {
@@ -128,8 +207,8 @@ int main(int argc, char**argv) {
 	// Get environment variable indicating the port of the server
 	serverport = getenv("serverport15440");
 	if (serverport) port = (unsigned short)atoi(serverport);
-//	else port=15440;
-	else port=34435;
+	else port=15440;
+//	else port=34735;
 
 	// Create socket
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);	// TCP/IP socket
@@ -164,16 +243,41 @@ int main(int argc, char**argv) {
             char* buf1 = malloc(hdr->size);
             switch (hdr->type) {
                 case KOPENOP:
+                    printf("open!\n");
                     serverOpen(rv, sessfd, buf1, hdr);
                     break;
-                case KWRITEOP:
-                    serverWrite(rv, sessfd, buf1, hdr);
+                case KCLOSEOP:
+                    printf("close!\n");
+                    serverClose(rv, sessfd, buf1, hdr);
                     break;
                 case KREADOP:
+                    printf("read!\n");
                     serverRead(rv, sessfd, buf1, hdr);
                     break;
-                case KCLOSEOP:
-                    serverClose(rv, sessfd, buf1, hdr);
+                case KWRITEOP:
+                    printf("write!\n");
+                    serverWrite(rv, sessfd, buf1, hdr);
+                    break;
+                case KLSEEKOP:
+                    printf("lseek!\n");
+                    serverLSeek(rv, sessfd, buf1, hdr);
+                    break;
+                case KSTATOP:
+                    printf("stat!\n");
+                    serverStat(rv, sessfd, buf1, hdr);
+                    break;
+                case KUNLINKOP:
+                    printf("unlink!\n");
+                    serverUnlink(rv, sessfd, buf1, hdr);
+                    break;
+                case KGETDIRENTRIESOP:
+                    printf("Get dir entries!\n");
+                    serverGetdirentries(rv, sessfd, buf1, hdr);
+                    printf("Get dir entries finished!\n");
+                    break;
+                case KGETDIRTREEOP:
+                    break;
+                case KFREEDIRTREE:
                     break;
                 default:
                     break;

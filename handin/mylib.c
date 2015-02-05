@@ -44,6 +44,7 @@ typedef struct {
 typedef struct {
     int a;
     int b;
+    int c;
     char s[];
 } para;
 
@@ -52,7 +53,13 @@ typedef enum {
     KOPENOP,
     KCLOSEOP,
     KREADOP,
-    KWRITEOP
+    KWRITEOP,
+    KLSEEKOP,
+    KSTATOP,
+    KUNLINKOP,
+    KGETDIRENTRIESOP,
+    KGETDIRTREEOP,
+    KFREEDIRTREE
 } optype;
 
 para* sendToServer (void* msg, size_t size) {
@@ -72,8 +79,8 @@ para* sendToServer (void* msg, size_t size) {
 	// Get environment variable indicating the port of the server
 	serverport = getenv("serverport15440");
 	if (!serverport) {
-//		serverport = "15440";
-		serverport = "34435";
+		serverport = "15440";
+//		serverport = "34735";
 	}
 	port = (unsigned short)atoi(serverport);
 
@@ -151,6 +158,47 @@ para* serialize_close(int fd, int *size) {
     return p;
 }
 
+para* serialize_lseek(int fd, off_t offset, int whence,int *size) {
+    *size = sizeof(para);
+    para* p = malloc(sizeof(para));
+    p->a = fd;
+    p->b = offset;
+    p->c = whence;
+    return p;
+}
+
+para* serialize_stat(int ver, const char * path,
+                     struct stat * stat_buf, int*size) {
+    size_t strSize = strlen(path)+sizeof(struct stat)+1;
+    *size = sizeof(para) + strSize;
+    para* p = malloc(sizeof(para) + strSize);
+    p->a = ver;
+    p->b = strlen(path)+1;
+    memcpy(p->s, path, p->b);
+    memcpy(p->s+p->b, stat_buf, sizeof(struct stat));
+    /* strncpy(p->s, (char*)buf, nbyte); */
+    return p;
+}
+
+para* serialize_unlink(const char *path, int* size) {
+    size_t strSize = strlen(path)+1;
+    *size = sizeof(para) + strSize;
+    para* p = malloc(sizeof(para) + strSize);
+    p->a = strlen(path);
+    memcpy(p->s, path, strSize);
+    /* strncpy(p->s, (char*)buf, nbyte); */
+    return p;
+}
+
+para* serialize_getdirentries(int fd, size_t nbytes, off_t base, int* size) {
+    *size = sizeof(para);
+    para* p = malloc(sizeof(para));
+    p->a = fd;
+    p->b = nbytes;
+    p->c = base;
+    return p;
+}
+
 // This is our replacement for the open function from libc.
 int open(const char *pathname, int flags, ...) {
     /* printf("open pathname: %s, flags: %d\n", pathname, flags); */
@@ -181,7 +229,6 @@ int open(const char *pathname, int flags, ...) {
 	return ret;
 }
 
-
 ssize_t read(int fd, void *buf, size_t nbyte) {
 //    printf("read!\n");
     int psize = 0;
@@ -202,7 +249,6 @@ ssize_t read(int fd, void *buf, size_t nbyte) {
     free(h);
     free(msg);
     free(p);
-//    sendToServer("write", 6);
 	return ret;
 }
 
@@ -253,23 +299,97 @@ int close(int fd) {
 }
 
 off_t lseek(int fd, off_t offset, int whence) {
-    sendToServer("lseek", 10);
-    return orig_lseek(fd, offset, whence);
+    /* printf("close fd: %d\n", fd); */
+    int psize = 0;
+    // Change here----------------------------------------
+    para *p = serialize_lseek(fd, offset, whence, &psize);
+    /* printf("    in para fd: %d\n", p->a); */
+    opHeader* h = malloc(sizeof(opHeader));
+    // and here----------------------------------------
+    h->type = KLSEEKOP;
+    h->size= psize;
+    char* msg = malloc (psize + sizeof(opHeader));
+    memcpy(msg, h, sizeof(opHeader));
+    memcpy(msg+sizeof(opHeader), p, psize);
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    free(pRet);
+    free(h);
+    free(msg);
+    free(p);
+	return ret;
 }
 
 int __xstat(int ver, const char * path, struct stat * stat_buf) {
-    sendToServer("stat", 10);
-    return orig_stat(ver, path, stat_buf);
+    /* printf("close fd: %d\n", fd); */
+    int psize = 0;
+    // Change here----------------------------------------
+    para *p = serialize_stat(ver, path, stat_buf, &psize);
+    /* printf("    in para fd: %d\n", p->a); */
+    opHeader* h = malloc(sizeof(opHeader));
+    // and here----------------------------------------
+    h->type = KSTATOP;
+    h->size= psize;
+    char* msg = malloc (psize + sizeof(opHeader));
+    memcpy(msg, h, sizeof(opHeader));
+    memcpy(msg+sizeof(opHeader), p, psize);
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    free(pRet);
+    free(h);
+    free(msg);
+    free(p);
+	return ret;
 }
 
 int unlink(const char *path) {
-    sendToServer("unlink", 10);
-    return orig_unlink(path);
+//     printf("unlink fd: %d\n", fd); 
+    int psize = 0;
+    // Change here----------------------------------------
+    para *p = serialize_unlink(path, &psize);
+    /* printf("    in para fd: %d\n", p->a); */
+    opHeader* h = malloc(sizeof(opHeader));
+    // and here----------------------------------------
+    h->type = KUNLINKOP;
+    h->size= psize;
+    char* msg = malloc (psize + sizeof(opHeader));
+    memcpy(msg, h, sizeof(opHeader));
+    memcpy(msg+sizeof(opHeader), p, psize);
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    free(pRet);
+    free(h);
+    free(msg);
+    free(p);
+	return ret;
 }
 
 ssize_t getdirentries(int fd, char *buf, size_t nbytes , off_t *basep) {
-    sendToServer("getdirentries", 10);
-    return orig_getdirentries(fd, buf, nbytes, basep);
+     printf("getdirentries fd: %d\n", fd);
+    int psize = 0;
+    para *p = serialize_getdirentries(fd, nbytes, *basep, &psize);
+     printf("    in para fd: %d, nbytes: %d, basep: %d\n", p->a, p->b, p->c);
+    opHeader* h = malloc(sizeof(opHeader));
+    // and here----------------------------------------
+    h->type = KGETDIRENTRIESOP;
+    h->size= psize;
+    char* msg = malloc (psize + sizeof(opHeader));
+    memcpy(msg, h, sizeof(opHeader));
+    memcpy(msg+sizeof(opHeader), p, psize);
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    printf("new basep: %d", pRet->c);
+    *basep = pRet->c;
+    memcpy(buf, pRet->s, nbytes);
+    free(pRet);
+    free(h);
+    free(msg);
+    free(p);
+	return ret;
 }
 
 struct dirtreenode* getdirtree( const char *path ) {
