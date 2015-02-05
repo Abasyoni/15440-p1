@@ -49,6 +49,55 @@ char* replyToClient(optype op,int returnValue, int errorNumber, char* buf,int *s
     return msg;
 }
 
+
+void serverOpen(int rv, int sessfd, char* buf1, opHeader *hdr){
+    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+        para *p = (para*) buf1;
+
+        const char* filepath = p->s;
+        /* printf("OPEN pathname: %s, flags: %d\n", filepath, p->a); */
+        int ret = open(filepath, p->a, p->b);
+        // send reply
+//                        printf("Sending reply. \n");
+        int mSize = 0;
+        char *msg = replyToClient(KOPENOP, ret, errno, "",&mSize);
+        send(sessfd, msg, mSize, 0);	// should check return value
+        free(msg);
+    }
+}
+
+void serverWrite(int rv, int sessfd, char* buf1, opHeader *hdr){
+    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+        para *p = (para*) buf1;
+
+        const void* writeBuf = p->s;
+        /* printf("WRITE fd: %d, nbytes: %d, buf: %s\n", p->a, p->b, p->s); */
+        int ret = write(p->a, writeBuf, p->b);
+
+        // send reply
+//                        printf("Sending reply. \n");
+        int mSize = 0;
+        char *msg = replyToClient(KWRITEOP, ret, errno, "",&mSize);
+        send(sessfd, msg, mSize, 0);	// should check return value
+        free(msg);
+    }
+}
+
+void serverClose(int rv, int sessfd, char* buf1, opHeader *hdr){
+    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
+        para *p = (para*) buf1;
+        int ret = close(p->a);
+
+        // send reply
+//                        printf("Sending reply. \n");
+        int mSize = 0;
+        char *msg = replyToClient(KCLOSEOP, ret, errno, "",&mSize);
+        send(sessfd, msg, mSize, 0);	// should check return value
+        free(msg);
+    }
+    
+}
+
 int main(int argc, char**argv) {
 	char buf[MAXMSGLEN+1];
 	char *serverport;
@@ -60,7 +109,8 @@ int main(int argc, char**argv) {
 	// Get environment variable indicating the port of the server
 	serverport = getenv("serverport15440");
 	if (serverport) port = (unsigned short)atoi(serverport);
-	else port=15440;
+//	else port=15440;
+	else port=34435;
 
 	// Create socket
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);	// TCP/IP socket
@@ -95,52 +145,15 @@ int main(int argc, char**argv) {
             char* buf1 = malloc(hdr->size);
             switch (hdr->type) {
                 case KOPENOP:
-                    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
-                        para *p = (para*) buf1;
-
-                        const char* filepath = p->s;
-                        /* printf("OPEN pathname: %s, flags: %d\n", filepath, p->a); */
-                        int ret = open(filepath, p->a, p->b);
-
-
-                        // send reply
-//                        printf("Sending reply. \n");
-                        int mSize = 0;
-                        char *msg = replyToClient(KOPENOP, ret, errno, NULL,&mSize);
-                        send(sessfd, msg, mSize, 0);	// should check return value
-                        free(msg);
-                    }
+                    serverOpen(rv, sessfd, buf1, hdr);
                     break;
 
                 case KWRITEOP:
-                    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
-                        para *p = (para*) buf1;
-
-                        const void* writeBuf = p->s;
-                        /* printf("WRITE fd: %d, nbytes: %d, buf: %s\n", p->a, p->b, p->s); */
-                        int ret = write(p->a, writeBuf, p->b);
-
-                        // send reply
-//                        printf("Sending reply. \n");
-                        int mSize = 0;
-                        char *msg = replyToClient(KWRITEOP, ret, errno, NULL,&mSize);
-                        send(sessfd, msg, mSize, 0);	// should check return value
-                        free(msg);
-                    }
+                    serverWrite(rv, sessfd, buf1, hdr);
                     break;
 
                 case KCLOSEOP:
-                    while ( (rv=recv(sessfd, buf1, hdr->size, 0)) > 0) {
-                        para *p = (para*) buf1;
-                        int ret = close(p->a);
-
-                        // send reply
-//                        printf("Sending reply. \n");
-                        int mSize = 0;
-                        char *msg = replyToClient(KCLOSEOP, ret, errno, NULL,&mSize);
-                        send(sessfd, msg, mSize, 0);	// should check return value
-                        free(msg);
-                    }
+                    serverClose(rv, sessfd, buf1, hdr);
                     break;
 
                 default:

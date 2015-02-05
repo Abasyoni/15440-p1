@@ -72,7 +72,8 @@ para* sendToServer (void* msg, size_t size) {
 	// Get environment variable indicating the port of the server
 	serverport = getenv("serverport15440");
 	if (!serverport) {
-		serverport = "15440";
+//		serverport = "15440";
+		serverport = "34435";
 	}
 	port = (unsigned short)atoi(serverport);
 
@@ -94,11 +95,12 @@ para* sendToServer (void* msg, size_t size) {
 	send(sockfd, msg, size, 0);	// send message; should check return value
 
 	// get message back
-	rv = recv(sockfd, buf, RETURNSIZE, 0);	// get message
+	rv = recv(sockfd, buf, sizeof(opHeader), 0);	// get message
     opHeader* hdr = malloc(sizeof(opHeader));
     memcpy(hdr, buf, sizeof(opHeader));
     para* buf1 = malloc(hdr->size);
-    memcpy(buf1, buf+sizeof(opHeader), hdr->size);
+    rv = recv(sockfd, buf1, hdr->size,0);
+//    memcpy(buf1, buf+sizeof(opHeader), hdr->size);
     free(hdr);
 
 	if (rv<0) err(1,0);			// in case something went wrong
