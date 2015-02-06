@@ -60,14 +60,15 @@ typedef enum {
 
 char* replyToClient(optype op,int returnValue, int errorNumber, int passBack,
                     char* buf, int bufLen,int *size) {
+    int strSize = 0;
     *size = sizeof(para)+sizeof(opHeader)+strlen(buf)+1;
-    int strSize = bufLen+1;
+    strSize = bufLen+1;
     para *p = malloc(sizeof(para)+strSize);
     p->a = returnValue;
     p->b = errorNumber;
     p->c = passBack;
-    strncpy(p->s, buf, strSize);
-    p->s[bufLen] = '\0';
+    memcpy(p->s, (void*)buf, strSize);
+//    p->s[bufLen] = '\0';
     opHeader* h = malloc(sizeof(opHeader));
     h->type = op;
     h->size= sizeof(para)+strSize;
@@ -110,7 +111,7 @@ void serverWrite(para * p, int sessfd){
 
 void serverRead(para * p, int sessfd){
     char *readBuf = malloc(p->b);
-    readBuf[p->b] = '\0';
+//    readBuf[p->b] = '\0';
 //         printf("    Read fd: %d, nbytes: %d \n", p->a, p->b);
     int ret = read(p->a, readBuf, p->b);
 
@@ -291,7 +292,7 @@ int main(int argc, char**argv) {
 	serverport = getenv("serverport15440");
 	if (serverport) port = (unsigned short)atoi(serverport);
 //	else port=15440;
-	else port=34735;
+	else port=34335;
 
 	// Create socket
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);	// TCP/IP socket
@@ -326,7 +327,6 @@ int main(int argc, char**argv) {
         }
         
 		// either client closed connection, or error
-//		if (rv<0) err(1,0);
 		close(sessfd);
 	}
 

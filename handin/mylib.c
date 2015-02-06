@@ -23,6 +23,7 @@
 
 #define MAXMSGLEN 100
 #define RETURNSIZE (sizeof(opHeader)+sizeof(para))
+#define FDOFFSET 1234567
 
 // The following line declares a function pointer with the same prototype as the open function.
 int (*orig_open)(const char *pathname, int flags, ...);  // mode_t mode is needed when flags includes O_CREAT
@@ -73,11 +74,11 @@ para* sendToServer (void* msg, size_t size) {
 
     // Turning off Nagle's
     int flag = 1;
-    int result = setsockopt(curSockFD,            /* socket affected */
-                            IPPROTO_TCP,     /* set option at TCP level */
-                            TCP_NODELAY,     /* name of option */
-                            (char *) &flag,  /* the cast is historical cruft */
-                            sizeof(int));    /* length of option value */
+    setsockopt(curSockFD,            /* socket affected */
+               IPPROTO_TCP,     /* set option at TCP level */
+               TCP_NODELAY,     /* name of option */
+               (char *) &flag,  /* the cast is historical cruft */
+               sizeof(int));    /* length of option value */
 //    if (result < 0)
 //        printf("Failed to turn off Nagle's algorithim.");
     
@@ -220,6 +221,9 @@ int open(const char *pathname, int flags, ...) {
     free(p);
     para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
     int ret = pRet->a;
+    if (ret >= 0) {
+        ret += FDOFFSET;
+    }
     errno = pRet->b;
     free(pRet);
     free(msg);
@@ -227,10 +231,14 @@ int open(const char *pathname, int flags, ...) {
 }
 
 ssize_t read(int fd, void *buf, size_t nbyte) {
-//    if ((fd == 2)|| (fd == 1)|| (fd == 0)) {
-//        return orig_read(fd, buf, nbyte);
-//    }
 //    fprintf(stderr,"read!\n");
+    if (fd < FDOFFSET) {
+        // local
+        return orig_read(fd, buf, nbyte);
+    }
+    
+    fd = fd-FDOFFSET;
+    
     int psize = 0;
 //     printf("    input fd: %d, nbytes: %zd\n", fd, nbyte);
     para *p = serialize_read(fd, nbyte, &psize);
@@ -246,7 +254,7 @@ ssize_t read(int fd, void *buf, size_t nbyte) {
     int ret = pRet->a;
     errno = pRet->b;
 //    printf("    return val: %d, error: %s\n", pRet->a, strerror(pRet->b));
-    memcpy(buf, pRet->s, nbyte);
+    memcpy(buf, (void*)pRet->s, nbyte);
     free(pRet);
     free(h);
     free(msg);
@@ -260,6 +268,14 @@ ssize_t write(int fd, const void *buf, size_t nbyte) {
 //    if ((fd == 2)|| (fd == 1)|| (fd == 0)) {
 //        return orig_write(fd, buf, nbyte);
 //    }
+    
+    if (fd < FDOFFSET) {
+        // local
+        return orig_write(fd, buf, nbyte);
+    }
+    
+    fd = fd-FDOFFSET;
+    
     int psize = 0;
     const void* buf1 = buf;
     para *p = serialize_write(fd, buf1, nbyte, &psize);
@@ -281,6 +297,12 @@ ssize_t write(int fd, const void *buf, size_t nbyte) {
 }
 
 int close(int fd) {
+    if (fd < FDOFFSET) {
+        // local
+        return orig_close(fd);
+    }
+    
+    fd = fd-FDOFFSET;
 //    if ((fd == 2)|| (fd == 1)|| (fd == 0)) {
 //        orig_close(fd);
 //    }
@@ -305,6 +327,12 @@ int close(int fd) {
 }
 
 off_t lseek(int fd, off_t offset, int whence) {
+    if (fd < FDOFFSET) {
+        // local
+        return orig_lseek(fd, offset, whence);
+    }
+    
+    fd = fd-FDOFFSET;
     /* printf("close fd: %d\n", fd); */
     int psize = 0;
     para *p = serialize_lseek(fd, offset, whence, &psize);
@@ -453,7 +481,7 @@ void _init(void) {
 	serverport = getenv("serverport15440");
 	if (!serverport) {
 //		serverport = "15440";
-		serverport = "34735";
+		serverport = "34335";
 	}
 	port = (unsigned short)atoi(serverport);
 
