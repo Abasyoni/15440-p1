@@ -211,8 +211,73 @@ void serverGetdirtree(para * p, int sessfd){
     free(msg);
 }
 
-
-
+void handleClient (int sessfd) {
+    int rv;
+    
+	// get messages and send replies to this client, until it goes away
+    opHeader* hdr = malloc(sizeof(opHeader));
+    
+    while ( (rv=recv(sessfd, hdr, sizeof(opHeader), 0)) > 0) {
+//        printf("Got header: type: %d, size: %zd\n", hdr->type, hdr->size);
+        char* buf1 = malloc(hdr->size);
+        int recieved = 0;
+        while (recieved < (hdr->size)) {
+            rv=recv(sessfd, (((char *)buf1) + recieved), (hdr->size), 0);
+            recieved += rv;
+        }
+        
+//        printf("\n\n\nheader size: %d\n", hdr->size);
+        
+        para * p = (para*) buf1;
+        
+        switch (hdr->type) {
+            case KOPENOP:
+//                printf("open!\n");
+                serverOpen(p, sessfd);
+                break;
+            case KCLOSEOP:
+//                printf("close!\n");
+                serverClose(p, sessfd);
+                break;
+            case KREADOP:
+//                printf("read!\n");
+                serverRead(p, sessfd);
+                break;
+            case KWRITEOP:
+//                printf("write!\n");
+                serverWrite(p, sessfd);
+                break;
+            case KLSEEKOP:
+//                printf("lseek!\n");
+                serverLSeek(p, sessfd);
+                break;
+            case KSTATOP:
+//                printf("stat!\n");
+                serverStat(p, sessfd);
+                break;
+            case KUNLINKOP:
+//                printf("unlink!\n");
+                serverUnlink(p, sessfd);
+                break;
+            case KGETDIRENTRIESOP:
+//                printf("Get dir entries!\n");
+                serverGetdirentries(p, sessfd);
+//                printf("Get dir entries finished!\n");
+                break;
+            case KGETDIRTREEOP:
+                serverGetdirtree(p, sessfd);
+                break;
+            case KFREEDIRTREE:
+                break;
+            default:
+                break;
+        }
+        
+        free(p);
+    }
+    free(hdr);
+    
+}
 
 int main(int argc, char**argv) {
 //	char buf[MAXMSGLEN+1];
@@ -225,8 +290,8 @@ int main(int argc, char**argv) {
 	// Get environment variable indicating the port of the server
 	serverport = getenv("serverport15440");
 	if (serverport) port = (unsigned short)atoi(serverport);
-	else port=15440;
-//	else port=34735;
+//	else port=15440;
+	else port=34735;
 
 	// Create socket
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);	// TCP/IP socket
@@ -253,75 +318,15 @@ int main(int argc, char**argv) {
 		sa_size = sizeof(struct sockaddr_in);
 		sessfd = accept(sockfd, (struct sockaddr *)&cli, &sa_size);
 		if (sessfd<0) err(1,0);
-
-		// get messages and send replies to this client, until it goes away
-        opHeader* hdr = malloc(sizeof(opHeader));
         
-        
-        
-        
-        while ( (rv=recv(sessfd, hdr, sizeof(opHeader), 0)) > 0) {
-//            printf("Got header: type: %d, size: %zd\n", hdr->type, hdr->size);
-            char* buf1 = malloc(hdr->size);
-            int recieved = 0;
-            while (recieved < (hdr->size)) {
-                rv=recv(sessfd, (((char *)buf1) + recieved), (hdr->size), 0);
-                recieved += rv;
-            }
-            
-//            printf("\n\n\nheader size: %d\n", hdr->size);
-            
-            para * p = (para*) buf1;
-            
-            switch (hdr->type) {
-                case KOPENOP:
-//                    printf("open!\n");
-                    serverOpen(p, sessfd);
-                    break;
-                case KCLOSEOP:
-//                    printf("close!\n");
-                    serverClose(p, sessfd);
-                    break;
-                case KREADOP:
-//                    printf("read!\n");
-                    serverRead(p, sessfd);
-                    break;
-                case KWRITEOP:
-//                    printf("write!\n");
-                    serverWrite(p, sessfd);
-                    break;
-                case KLSEEKOP:
-//                    printf("lseek!\n");
-                    serverLSeek(p, sessfd);
-                    break;
-                case KSTATOP:
-//                    printf("stat!\n");
-                    serverStat(p, sessfd);
-                    break;
-                case KUNLINKOP:
-//                    printf("unlink!\n");
-                    serverUnlink(p, sessfd);
-                    break;
-                case KGETDIRENTRIESOP:
-//                    printf("Get dir entries!\n");
-                    serverGetdirentries(p, sessfd);
-//                    printf("Get dir entries finished!\n");
-                    break;
-                case KGETDIRTREEOP:
-                    serverGetdirtree(p, sessfd);
-                    break;
-                case KFREEDIRTREE:
-                    break;
-                default:
-                    break;
-            }
-            
-            free(p);
+        if (fork() == 0) {
+            close(sockfd);
+            handleClient(sessfd);
+            exit(0);
         }
-        free(hdr);
-
+        
 		// either client closed connection, or error
-		if (rv<0) err(1,0);
+//		if (rv<0) err(1,0);
 		close(sessfd);
 	}
 

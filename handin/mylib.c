@@ -452,8 +452,8 @@ void _init(void) {
 	// Get environment variable indicating the port of the server
 	serverport = getenv("serverport15440");
 	if (!serverport) {
-		serverport = "15440";
-//		serverport = "34735";
+//		serverport = "15440";
+		serverport = "34735";
 	}
 	port = (unsigned short)atoi(serverport);
 
