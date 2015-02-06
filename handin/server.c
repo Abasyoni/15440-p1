@@ -110,17 +110,24 @@ void serverWrite(para * p, int sessfd){
 }
 
 void serverRead(para * p, int sessfd){
-    char *readBuf = malloc(p->b);
-//    readBuf[p->b] = '\0';
+    int nbyte = p->b;
+    para* readBuf = malloc(sizeof(para) + nbyte);
 //         printf("    Read fd: %d, nbytes: %d \n", p->a, p->b);
-    int ret = read(p->a, readBuf, p->b);
+    int ret = read(p->a, (void*) readBuf->s, nbyte);
+    readBuf->a = ret;
+    readBuf->b = errno;
+    opHeader* h = malloc(sizeof(opHeader));
+    h->type = KREADOP;
+    h->size= sizeof(para)+nbyte;
+    char* msg = malloc (sizeof(para) + nbyte + sizeof(opHeader));
+    memcpy(msg, h, sizeof(opHeader));
+    memcpy(msg+sizeof(opHeader), readBuf, sizeof(para)+nbyte);
 
     // send reply
 //                        printf("    Sending reply. \n");
-    int mSize = 0;
-    char *msg = replyToClient(KREADOP, ret, errno, 0, readBuf, strlen(readBuf), &mSize);
-    send(sessfd, msg, mSize, 0);	// should check return value
+    send(sessfd, msg, (sizeof(para) + nbyte + sizeof(opHeader)), 0);	// should check return value
     free(readBuf);
+    free(h);
     free(msg);
 }
 

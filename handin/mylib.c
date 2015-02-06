@@ -90,13 +90,13 @@ para* sendToServer (void* msg, size_t size) {
     opHeader* hdr = malloc(sizeof(opHeader));
     memcpy(hdr, buf, sizeof(opHeader));
     char* buf1 = malloc(hdr->size);
-//    fprintf(stderr,"Recieving return value of size: %zd\n", hdr->size);
     if (((hdr->type) == KREADOP) || ((hdr->type) == KSTATOP)) {
+//        fprintf(stderr,"Recieving return value of size: %zd\n", hdr->size);
         int recieved = 0;
         while (recieved < (hdr->size)) {
             rv = recv(curSockFD, ((char*)buf1)+recieved, (hdr->size), 0);
             recieved += rv;
-    //        fprintf(stderr, "    Recieved: %d\n", recieved);
+//            fprintf(stderr, "    Recieved: %d\n", recieved);
         }
     } else {
         rv = recv(curSockFD, buf1, hdr->size,0);
@@ -237,7 +237,7 @@ ssize_t read(int fd, void *buf, size_t nbyte) {
         return orig_read(fd, buf, nbyte);
     }
     
-    fd = fd-FDOFFSET;
+    fd -= FDOFFSET;
     
     int psize = 0;
 //     printf("    input fd: %d, nbytes: %zd\n", fd, nbyte);
