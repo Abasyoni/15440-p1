@@ -17,6 +17,8 @@
 #include <err.h>
 #include <errno.h>
 
+#include <netinet/tcp.h>
+
 #include "dirtree.h"
 
 #define MAXMSGLEN 100
@@ -45,6 +47,7 @@ typedef struct {
     int a;
     int b;
     int c;
+    off_t o;
     char s[];
 } para;
 
@@ -62,62 +65,46 @@ typedef enum {
     KFREEDIRTREE
 } optype;
 
+int curSockFD;
+
 para* sendToServer (void* msg, size_t size) {
-	char *serverip;
-	char *serverport;
-	unsigned short port;
     char buf[MAXMSGLEN];
-	int sockfd, rv;
-	struct sockaddr_in srv;
+	int rv;
 
-	// Get environment variable indicating the ip address of the server
-	serverip = getenv("server15440");
-	if (!serverip) {
-		serverip = "127.0.0.1";
-	}
-
-	// Get environment variable indicating the port of the server
-	serverport = getenv("serverport15440");
-	if (!serverport) {
-		serverport = "15440";
-//		serverport = "34735";
-	}
-	port = (unsigned short)atoi(serverport);
-
-	// Create socket
-	sockfd = socket(AF_INET, SOCK_STREAM, 0);	// TCP/IP socket
-	if (sockfd<0) err(1, 0);			// in case of error
-
-	// setup address structure to point to server
-	memset(&srv, 0, sizeof(srv));			// clear it first
-	srv.sin_family = AF_INET;			// IP family
-	srv.sin_addr.s_addr = inet_addr(serverip);	// IP address of server
-	srv.sin_port = htons(port);			// server port
-
-	// actually connect to the server
-	rv = connect(sockfd, (struct sockaddr*)&srv, sizeof(struct sockaddr));
-	if (rv<0) err(1,0);
-
+    // Turning off Nagle's
+    int flag = 1;
+    int result = setsockopt(curSockFD,            /* socket affected */
+                            IPPROTO_TCP,     /* set option at TCP level */
+                            TCP_NODELAY,     /* name of option */
+                            (char *) &flag,  /* the cast is historical cruft */
+                            sizeof(int));    /* length of option value */
+//    if (result < 0)
+//        printf("Failed to turn off Nagle's algorithim.");
+    
 	// send message to server
-	send(sockfd, msg, size, 0);	// send message; should check return value
+	send(curSockFD, msg, size, 0);	// send message; should check return value
 
 	// get message back
-	rv = recv(sockfd, buf, sizeof(opHeader), 0);	// get message
+	rv = recv(curSockFD, buf, sizeof(opHeader), 0);	// get message
     opHeader* hdr = malloc(sizeof(opHeader));
     memcpy(hdr, buf, sizeof(opHeader));
-    para* buf1 = malloc(hdr->size);
-    rv = recv(sockfd, buf1, hdr->size,0);
-//    memcpy(buf1, buf+sizeof(opHeader), hdr->size);
+    char* buf1 = malloc(hdr->size);
+//    fprintf(stderr,"Recieving return value of size: %zd\n", hdr->size);
+    if (((hdr->type) == KREADOP) || ((hdr->type) == KSTATOP)) {
+        int recieved = 0;
+        while (recieved < (hdr->size)) {
+            rv = recv(curSockFD, ((char*)buf1)+recieved, (hdr->size), 0);
+            recieved += rv;
+    //        fprintf(stderr, "    Recieved: %d\n", recieved);
+        }
+    } else {
+        rv = recv(curSockFD, buf1, hdr->size,0);
+    }
     free(hdr);
 
 	if (rv<0) err(1,0);			// in case something went wrong
-	buf[rv]=0;				// null terminate string to print
 
-	// close socket
-	orig_close(sockfd);
-
-
-	return buf1;
+	return (para*) buf1;
 }
 
 para* serialize_open(const char* pathname, int flags, int mode, int* size) {
@@ -190,18 +177,29 @@ para* serialize_unlink(const char *path, int* size) {
     return p;
 }
 
-para* serialize_getdirentries(int fd, size_t nbytes, off_t base, int* size) {
+para* serialize_getdirentries(int fd, size_t nbytes, off_t* basep, int* size) {
     *size = sizeof(para);
     para* p = malloc(sizeof(para));
     p->a = fd;
     p->b = nbytes;
-    p->c = base;
+    p->c = *basep;
+    p->o = *basep;
+    return p;
+}
+
+para* serialize_getdirtree(const char *path, int* size) {
+    size_t strSize = strlen(path)+1;
+    *size = sizeof(para) + strSize;
+    para* p = malloc(sizeof(para) + strSize);
+    p->a = strlen(path);
+    memcpy(p->s, path, strSize);
+    /* strncpy(p->s, (char*)buf, nbyte); */
     return p;
 }
 
 // This is our replacement for the open function from libc.
 int open(const char *pathname, int flags, ...) {
-    /* printf("open pathname: %s, flags: %d\n", pathname, flags); */
+//    fprintf(stderr, "Open: %s\n", pathname);
 	mode_t m=0;
 	if (flags & O_CREAT) {
 		va_list a;
@@ -212,7 +210,6 @@ int open(const char *pathname, int flags, ...) {
 	// we just print a message, then call through to the original open function (from libc)
     int psize = 0;
     para *p = serialize_open(pathname, flags, m, &psize);
-    /* printf("    in para pathname: %s, flags: %d\n", p->s, p->a); */
     opHeader* h = malloc(sizeof(opHeader));
     h->type = KOPENOP;
     h->size= psize;
@@ -230,7 +227,10 @@ int open(const char *pathname, int flags, ...) {
 }
 
 ssize_t read(int fd, void *buf, size_t nbyte) {
-//    printf("read!\n");
+//    if ((fd == 2)|| (fd == 1)|| (fd == 0)) {
+//        return orig_read(fd, buf, nbyte);
+//    }
+//    fprintf(stderr,"read!\n");
     int psize = 0;
 //     printf("    input fd: %d, nbytes: %zd\n", fd, nbyte);
     para *p = serialize_read(fd, nbyte, &psize);
@@ -242,8 +242,10 @@ ssize_t read(int fd, void *buf, size_t nbyte) {
     memcpy(msg, h, sizeof(opHeader));
     memcpy(msg+sizeof(opHeader), p, psize);
     para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+//    printf("    got reply: length %zd!\n", strlen(p->s));
     int ret = pRet->a;
     errno = pRet->b;
+//    printf("    return val: %d, error: %s\n", pRet->a, strerror(pRet->b));
     memcpy(buf, pRet->s, nbyte);
     free(pRet);
     free(h);
@@ -253,9 +255,11 @@ ssize_t read(int fd, void *buf, size_t nbyte) {
 }
 
 ssize_t write(int fd, const void *buf, size_t nbyte) {
-//    printf("Write!");
-
-    /* printf("write fd: %d, nbytes: %zd, buf: %s\n", fd, nbyte, (char*)buf); */
+//    fprintf(stderr,"Write!");
+//     printf("    write fd: %d, nbytes: %zd\n", fd, nbyte);
+//    if ((fd == 2)|| (fd == 1)|| (fd == 0)) {
+//        return orig_write(fd, buf, nbyte);
+//    }
     int psize = 0;
     const void* buf1 = buf;
     para *p = serialize_write(fd, buf1, nbyte, &psize);
@@ -273,12 +277,14 @@ ssize_t write(int fd, const void *buf, size_t nbyte) {
     free(h);
     free(msg);
     free(p);
-//    sendToServer("write", 6);
 	return ret;
 }
 
 int close(int fd) {
-    /* printf("close fd: %d\n", fd); */
+//    if ((fd == 2)|| (fd == 1)|| (fd == 0)) {
+//        orig_close(fd);
+//    }
+//     printf("close fd: %d\n", fd);
     int psize = 0;
     para *p = serialize_close(fd, &psize);
     /* printf("    in para fd: %d\n", p->a); */
@@ -301,11 +307,9 @@ int close(int fd) {
 off_t lseek(int fd, off_t offset, int whence) {
     /* printf("close fd: %d\n", fd); */
     int psize = 0;
-    // Change here----------------------------------------
     para *p = serialize_lseek(fd, offset, whence, &psize);
     /* printf("    in para fd: %d\n", p->a); */
     opHeader* h = malloc(sizeof(opHeader));
-    // and here----------------------------------------
     h->type = KLSEEKOP;
     h->size= psize;
     char* msg = malloc (psize + sizeof(opHeader));
@@ -324,11 +328,9 @@ off_t lseek(int fd, off_t offset, int whence) {
 int __xstat(int ver, const char * path, struct stat * stat_buf) {
     /* printf("close fd: %d\n", fd); */
     int psize = 0;
-    // Change here----------------------------------------
     para *p = serialize_stat(ver, path, stat_buf, &psize);
     /* printf("    in para fd: %d\n", p->a); */
     opHeader* h = malloc(sizeof(opHeader));
-    // and here----------------------------------------
     h->type = KSTATOP;
     h->size= psize;
     char* msg = malloc (psize + sizeof(opHeader));
@@ -345,13 +347,11 @@ int __xstat(int ver, const char * path, struct stat * stat_buf) {
 }
 
 int unlink(const char *path) {
-//     printf("unlink fd: %d\n", fd); 
+//     printf("unlink fd: %d\n", fd);
     int psize = 0;
-    // Change here----------------------------------------
     para *p = serialize_unlink(path, &psize);
     /* printf("    in para fd: %d\n", p->a); */
     opHeader* h = malloc(sizeof(opHeader));
-    // and here----------------------------------------
     h->type = KUNLINKOP;
     h->size= psize;
     char* msg = malloc (psize + sizeof(opHeader));
@@ -368,10 +368,10 @@ int unlink(const char *path) {
 }
 
 ssize_t getdirentries(int fd, char *buf, size_t nbytes , off_t *basep) {
-     printf("getdirentries fd: %d\n", fd);
+//     printf("getdirentries fd: %d\n", fd);
     int psize = 0;
-    para *p = serialize_getdirentries(fd, nbytes, *basep, &psize);
-     printf("    in para fd: %d, nbytes: %d, basep: %d\n", p->a, p->b, p->c);
+    para *p = serialize_getdirentries(fd, nbytes, basep, &psize);
+//     printf("    in para fd: %d, nbytes: %d, basep: %d\n", p->a, p->b, p->c);
     opHeader* h = malloc(sizeof(opHeader));
     // and here----------------------------------------
     h->type = KGETDIRENTRIESOP;
@@ -380,21 +380,40 @@ ssize_t getdirentries(int fd, char *buf, size_t nbytes , off_t *basep) {
     memcpy(msg, h, sizeof(opHeader));
     memcpy(msg+sizeof(opHeader), p, psize);
     para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
-    int ret = pRet->a;
+//    int ret = pRet->a;
     errno = pRet->b;
-    printf("new basep: %d", pRet->c);
+//    printf("new basep: %d", pRet->c);
     *basep = pRet->c;
     memcpy(buf, pRet->s, nbytes);
     free(pRet);
     free(h);
     free(msg);
     free(p);
-	return ret;
+	return -1;
+//    printf("old base: %d\n", (int) *basep);
+//    int ret = orig_getdirentries(fd, buf, nbytes, basep);
+//    printf("new base: %d\n", (int) *basep);
+//    return ret;
 }
 
 struct dirtreenode* getdirtree( const char *path ) {
-    sendToServer("getdirtree", 10);
-    return orig_getdirtree(path);
+    int psize = 0;
+    para *p = serialize_getdirtree(path, &psize);
+    /* printf("    in para fd: %d\n", p->a); */
+    opHeader* h = malloc(sizeof(opHeader));
+    h->type = KGETDIRTREEOP;
+    h->size= psize;
+    char* msg = malloc (psize + sizeof(opHeader));
+    memcpy(msg, h, sizeof(opHeader));
+    memcpy(msg+sizeof(opHeader), p, psize);
+    para* pRet = sendToServer(msg, (psize+sizeof(opHeader)));
+    int ret = pRet->a;
+    errno = pRet->b;
+    free(pRet);
+    free(h);
+    free(msg);
+    free(p);
+	return ret;
 }
 
 void freedirtree( struct dirtreenode* dt ) {
@@ -417,6 +436,50 @@ void _init(void) {
     orig_freedirtree = dlsym(RTLD_NEXT, "freedirtree");
 
 	fprintf(stderr, "Init mylib\n");
+
+	char *serverip;
+	char *serverport;
+	unsigned short port;
+	int sockfd, rv;
+	struct sockaddr_in srv;
+
+	// Get environment variable indicating the ip address of the server
+	serverip = getenv("server15440");
+	if (!serverip) {
+		serverip = "127.0.0.1";
+	}
+
+	// Get environment variable indicating the port of the server
+	serverport = getenv("serverport15440");
+	if (!serverport) {
+		serverport = "15440";
+//		serverport = "34735";
+	}
+	port = (unsigned short)atoi(serverport);
+
+	// Create socket
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);	// TCP/IP socket
+	if (sockfd<0) err(1, 0);			// in case of error
+
+	// setup address structure to point to server
+	memset(&srv, 0, sizeof(srv));			// clear it first
+	srv.sin_family = AF_INET;			// IP family
+	srv.sin_addr.s_addr = inet_addr(serverip);	// IP address of server
+	srv.sin_port = htons(port);			// server port
+    
+
+	// actually connect to the server
+	rv = connect(sockfd, (struct sockaddr*)&srv, sizeof(struct sockaddr));
+    
+    
+	if (rv<0) err(1,0);
+
+    curSockFD = sockfd;
+    
 }
 
 
+void _fini(void) {
+	// close socket
+	orig_close(curSockFD);
+}
